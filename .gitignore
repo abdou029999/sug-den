@@ -1,2 +1,5 @@
 node_modules
 *.apk
+android/
+ios/
+.expo/

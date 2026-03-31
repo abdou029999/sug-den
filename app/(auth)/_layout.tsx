@@ -8,9 +8,6 @@ export default function AuthLayout() {
       }}>
       <Stack.Screen
         name="SignInScreen"
-        options={{
-          animationEnabled: true,
-        }}
       />
     </Stack>
   );

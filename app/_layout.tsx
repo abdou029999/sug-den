@@ -10,15 +10,12 @@ export default function RootLayout() {
         }}>
         <Stack.Screen
           name="index"
-          options={{ animationEnabled: false }}
         />
         <Stack.Screen
           name="(auth)"
-          options={{ animationEnabled: false }}
         />
         <Stack.Screen
           name="(tabs)"
-          options={{ animationEnabled: false }}
         />
       </Stack>
     </GestureHandlerRootView>

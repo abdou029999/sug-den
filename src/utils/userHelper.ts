@@ -4,7 +4,7 @@
  */
 
 import { db, auth } from '../config/firebase';
-import { collection, doc, getDoc, updateDoc, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDoc, updateDoc, query, where, getDocs, onSnapshot, deleteDoc } from 'firebase/firestore';
 
 export interface User {
   uid: string;
@@ -210,7 +210,7 @@ export async function unfollowUser(targetUserId: string): Promise<void> {
     
     const snapshot = await getDocs(existingFollow);
     if (!snapshot.empty) {
-      await Promise.all(snapshot.docs.map((doc) => doc.ref.delete()));
+      await Promise.all(snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref)));
 
       // Update counts
       const currentUserRef = doc(db, 'users', currentUserId);

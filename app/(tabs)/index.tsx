@@ -112,6 +112,8 @@ export default function LiveScreen() {
           ))}
         </ScrollView>
       )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({

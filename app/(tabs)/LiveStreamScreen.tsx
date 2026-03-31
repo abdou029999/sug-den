@@ -31,12 +31,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Dimensions, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { RtcEngine, ChannelProfile, ClientRole } from 'react-native-agora';
 import { createLiveStream, endLiveStream, subscribeToActiveStreams } from '../../src/utils/agoraHelper';
 import { getCurrentUserProfile } from '../../src/utils/userHelper';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const AGORA_APP_ID = 'ebd4c18270f34be1b62017bc390edf10';
 
 export default function LiveStreamScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -46,7 +44,6 @@ export default function LiveStreamScreen() {
   const [viewerCount, setViewerCount] = useState(0);
   const [streamId, setStreamId] = useState<string | null>(null);
   const [username, setUsername] = useState('');
-  const [rtcEngine, setRtcEngine] = useState<RtcEngine | null>(null);
   const [loading, setLoading] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
@@ -98,24 +95,9 @@ export default function LiveStreamScreen() {
 
     setLoading(true);
     try {
-      // Initialize Agora
-      const engine = new RtcEngine();
-      await engine.initialize(AGORA_APP_ID);
-      await engine.setChannelProfile(ChannelProfile.LiveBroadcasting);
-      await engine.setClientRole(ClientRole.Broadcaster);
-      await engine.enableVideo();
-      await engine.enableAudio();
-
       // Create stream in Firestore
       const newStreamId = await createLiveStream(username, 'Live Stream');
       
-      // Get the channel ID from the stream
-      const channelId = `channel_${username}_${Date.now()}`;
-      
-      // Join Agora channel
-      await engine.joinChannel('', channelId, 0);
-
-      setRtcEngine(engine);
       setStreamId(newStreamId);
       setIsLive(true);
       setViewerCount(1);
@@ -139,13 +121,6 @@ export default function LiveStreamScreen() {
           try {
             setLoading(true);
             
-            // Leave Agora channel
-            if (rtcEngine) {
-              await rtcEngine.leaveChannel();
-              await rtcEngine.destroy();
-              setRtcEngine(null);
-            }
-
             // End stream in Firestore
             if (streamId) {
               await endLiveStream(streamId);
