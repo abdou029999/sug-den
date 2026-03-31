@@ -82,34 +82,48 @@ export default function LiveStreamScreen() {
     }
 
     const init = async () => {
-      const profile = await getCurrentUserProfile();
-      if (profile) {
-        setUser({
-          uid: profile.uid,
-          username: profile.username,
-          email: profile.email,
-        });
+      try {
+        const profile = await getCurrentUserProfile();
+        if (profile) {
+          setUser({
+            uid: profile.uid,
+            username: profile.username,
+            email: profile.email,
+          });
+        }
+      } catch (error) {
+        console.error('Error loading user profile:', error);
       }
     };
 
     init();
-  }, [permission]);
+  }, [permission, requestPermission]);
 
   // Subscribe to streams
   useEffect(() => {
-    const unsubscribe = subscribeToActiveStreams((activeStreams) => {
-      setStreams(activeStreams);
-      
-      // Update viewer count for current stream
-      if (currentStreamId && isLive) {
-        const current = activeStreams.find((s) => s.streamId === currentStreamId);
-        if (current) {
-          setViewerCount(current.viewers);
+    try {
+      const unsubscribe = subscribeToActiveStreams((activeStreams) => {
+        setStreams(activeStreams);
+        
+        // Update viewer count for current stream
+        if (currentStreamId && isLive) {
+          const current = activeStreams.find((s) => s.streamId === currentStreamId);
+          if (current) {
+            setViewerCount(current.viewers);
+          }
         }
-      }
-    });
+      });
 
-    return () => unsubscribe();
+      return () => {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error('Error unsubscribing from streams:', error);
+        }
+      };
+    } catch (error) {
+      console.error('Error subscribing to streams:', error);
+    }
   }, [currentStreamId, isLive]);
 
   // Handle GO LIVE (Broadcaster)

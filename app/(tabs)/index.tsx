@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { subscribeToActiveStreams, addLiveViewer } from '../../src/utils/agoraHelper';
+import { getCurrentUserProfile } from '../../src/utils/userHelper';
 
 interface LiveStream {
   streamId: string;
@@ -14,18 +15,47 @@ interface LiveStream {
 export default function LiveScreen() {
   const [liveStreams, setLiveStreams] = useState<LiveStream[]>([]);
   const [loading, setLoading] = useState(true);
+  const [username, setUsername] = useState('');
   const router = useRouter();
 
+  // Get current user
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const profile = await getCurrentUserProfile();
+        if (profile) {
+          setUsername(profile.username);
+        }
+      } catch (error) {
+        console.error('Error loading user:', error);
+      }
+    };
+
+    loadUser();
+  }, []);
+
+  // Subscribe to streams
   useEffect(() => {
     setLoading(true);
     
-    // Subscribe to real-time updates from Firestore
-    const unsubscribe = subscribeToActiveStreams((streams) => {
-      setLiveStreams(streams);
-      setLoading(false);
-    });
+    try {
+      // Subscribe to real-time updates from Firestore
+      const unsubscribe = subscribeToActiveStreams((streams) => {
+        setLiveStreams(streams);
+        setLoading(false);
+      });
 
-    return () => unsubscribe();
+      return () => {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error('Error unsubscribing:', error);
+        }
+      };
+    } catch (error) {
+      console.error('Error subscribing to streams:', error);
+      setLoading(false);
+    }
   }, []);
 
   const handleGoLive = () => {
@@ -34,7 +64,11 @@ export default function LiveScreen() {
 
   const handleJoinLive = async (stream: LiveStream) => {
     try {
-      await addLiveViewer(stream.streamId, 'current_user');
+      if (!username) {
+        Alert.alert('Error', 'User profile not loaded');
+        return;
+      }
+      await addLiveViewer(stream.streamId, username);
       router.push({
         pathname: './LiveStreamScreen',
         params: { streamId: stream.streamId, join: 'true' }

@@ -36,9 +36,11 @@ export default function MessagesScreen() {
     setLoading(true);
     try {
       const results = await searchUsers(query);
-      setSearchResults(results);
+      setSearchResults(results || []);
     } catch (error) {
+      console.error('Search error:', error);
       Alert.alert('Error', 'Failed to search users');
+      setSearchResults([]);
     } finally {
       setLoading(false);
     }
