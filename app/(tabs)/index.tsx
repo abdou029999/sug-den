@@ -1,19 +1,59 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
+import { subscribeToActiveStreams, addLiveViewer } from '../../src/utils/agoraHelper';
 
-const liveStreams = [
-  { id: '1', username: 'Luna_Star', viewers: 247, thumbnail: 'https://picsum.photos/300/400?random=1' },
-  { id: '2', username: 'CelestialAura', viewers: 189, thumbnail: 'https://picsum.photos/300/400?random=2' },
-  { id: '3', username: 'MysticVibes', viewers: 312, thumbnail: 'https://picsum.photos/300/400?random=3' },
-  { id: '4', username: 'StarGazer', viewers: 456, thumbnail: 'https://picsum.photos/300/400?random=4' },
-];
+interface LiveStream {
+  streamId: string;
+  userId: string;
+  username: string;
+  viewers: number;
+  isActive: boolean;
+}
 
 export default function LiveScreen() {
+  const [liveStreams, setLiveStreams] = useState<LiveStream[]>([]);
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  useEffect(() => {
+    setLoading(true);
+    
+    // Subscribe to real-time updates from Firestore
+    const unsubscribe = subscribeToActiveStreams((streams) => {
+      setLiveStreams(streams);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleGoLive = () => {
     router.push('./LiveStreamScreen');
+  };
+
+  const handleJoinLive = async (stream: LiveStream) => {
+    try {
+      await addLiveViewer(stream.streamId, 'current_user');
+      router.push({
+        pathname: './LiveStreamScreen',
+        params: { streamId: stream.streamId, join: 'true' }
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to join live stream');
+    }
+  };
+
+  const handleInvite = async (stream: LiveStream) => {
+    const { Share } = await import('react-native');
+    try {
+      await Share.share({
+        message: `Check out ${stream.username}'s live stream on Aura App! 🔴 ${stream.viewers} watching now!`,
+        title: 'Join Live Stream',
+      });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
   };
 
   return (
@@ -24,22 +64,54 @@ export default function LiveScreen() {
           <Text style={styles.goLiveText}>🎬 GO LIVE</Text>
         </TouchableOpacity>
       </View>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {liveStreams.map((stream) => (
-          <TouchableOpacity key={stream.id} style={styles.card}>
-            <Image source={{ uri: stream.thumbnail }} style={styles.thumbnail} />
-            <View style={styles.liveIndicator}>
-              <Text style={styles.liveText}>🔴 LIVE</Text>
+      
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading live streams...</Text>
+        </View>
+      ) : liveStreams.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No one is live right now</Text>
+          <Text style={styles.emptySubtext}>Tap "GO LIVE" to be the first! 🔴</Text>
+        </View>
+      ) : (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {liveStreams.map((stream) => (
+            <View key={stream.streamId} style={styles.card}>
+              <TouchableOpacity 
+                style={styles.livePreview}
+                onPress={() => handleJoinLive(stream)}>
+                <View style={styles.placeholderImage}>
+                  <Text style={styles.placeholderText}>📹</Text>
+                </View>
+                <View style={styles.liveIndicator}>
+                  <Text style={styles.liveText}>🔴 LIVE</Text>
+                </View>
+              </TouchableOpacity>
+              
+              <View style={styles.cardInfo}>
+                <View style={styles.userInfo}>
+                  <Text style={styles.username}>{stream.username}</Text>
+                  <Text style={styles.viewers}>👥 {stream.viewers} watching</Text>
+                </View>
+                
+                <View style={styles.actions}>
+                  <TouchableOpacity 
+                    style={styles.actionBtn}
+                    onPress={() => handleJoinLive(stream)}>
+                    <Text style={styles.actionBtnText}>Join</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.actionBtn, styles.actionBtnSecondary]}
+                    onPress={() => handleInvite(stream)}>
+                    <Text style={styles.actionBtnTextSecondary}>Share</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-            <View style={styles.cardInfo}>
-              <Text style={styles.username}>{stream.username}</Text>
-              <Text style={styles.viewers}>👥 {stream.viewers} watching</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
-  );
+          ))}
+        </ScrollView>
+      )}
 }
 
 const styles = StyleSheet.create({
@@ -74,7 +146,33 @@ const styles = StyleSheet.create({
     flex: 1 
   },
   scrollContent: { 
-    padding: 15 
+    padding: 15,
+    paddingBottom: 30 
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#9CA3AF',
+    fontSize: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  emptySubtext: {
+    color: '#9CA3AF',
+    fontSize: 14,
   },
   card: { 
     borderRadius: 15, 
@@ -82,17 +180,28 @@ const styles = StyleSheet.create({
     marginBottom: 15, 
     backgroundColor: '#1A1A1A' 
   },
-  thumbnail: { 
-    width: '100%', 
-    height: 250 
+  livePreview: {
+    width: '100%',
+    height: 250,
+    position: 'relative',
+  },
+  placeholderImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#2A2A2A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    fontSize: 60,
   },
   liveIndicator: {
     position: 'absolute',
     top: 10,
     right: 10,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 20,
   },
   liveText: {
@@ -103,6 +212,9 @@ const styles = StyleSheet.create({
   cardInfo: { 
     padding: 15 
   },
+  userInfo: {
+    marginBottom: 10,
+  },
   username: { 
     color: '#fff', 
     fontSize: 16, 
@@ -112,6 +224,33 @@ const styles = StyleSheet.create({
     color: '#9CA3AF', 
     fontSize: 14, 
     marginTop: 5 
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionBtn: {
+    flex: 1,
+    backgroundColor: '#8B5CF6',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  actionBtnSecondary: {
+    backgroundColor: '#2A2A2A',
+    borderWidth: 1,
+    borderColor: '#8B5CF6',
+  },
+  actionBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  actionBtnTextSecondary: {
+    color: '#8B5CF6',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 });
 

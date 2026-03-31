@@ -1,6 +1,6 @@
 /**
  * ═══════════════════════════════════════════════════════════
- * LIVE STREAM SCREEN - CAMERA & STREAMING
+ * LIVE STREAM SCREEN - CAMERA & AGORA STREAMING
  * ═══════════════════════════════════════════════════════════
  * 
  * 📹 CAMERA CONTROLS (Like TikTok):
@@ -8,25 +8,35 @@
  * • 🎤 Mic Toggle: Turn microphone on/off
  * • 📷 Camera Switch: Switch between front (selfie) and back camera
  * • 🔴 GO LIVE / END LIVE: Start and stop streaming
+ * • 👥 INVITE: Share your live with friends
  * 
  * DEFAULT: Front camera (selfie mode)
  * SWITCH: Tap 📷 button to switch to back camera
  * 
- * VIEWER COUNT: Updates in real-time while streaming
+ * VIEWER COUNT: Real-time viewer count from Firestore
  * 
  * PERMISSIONS REQUIRED:
  * • Camera (expo-camera)
  * • Microphone (audio recording)
  * 
+ * FIRESTORE INTEGRATION:
+ * • Stream stored in live_streams collection
+ * • Viewers tracked in real-time
+ * • Auto cleanup when ending stream
+ * 
  * ═══════════════════════════════════════════════════════════
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Dimensions, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { RtcEngine, ChannelProfile, ClientRole } from 'react-native-agora';
+import { createLiveStream, endLiveStream, subscribeToActiveStreams } from '../../src/utils/agoraHelper';
+import { getCurrentUserProfile } from '../../src/utils/userHelper';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const AGORA_APP_ID = 'ebd4c18270f34be1b62017bc390edf10';
 
 export default function LiveStreamScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -34,6 +44,10 @@ export default function LiveStreamScreen() {
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
   const [isLive, setIsLive] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
+  const [streamId, setStreamId] = useState<string | null>(null);
+  const [username, setUsername] = useState('');
+  const [rtcEngine, setRtcEngine] = useState<RtcEngine | null>(null);
+  const [loading, setLoading] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
 
@@ -41,21 +55,27 @@ export default function LiveStreamScreen() {
     if (!permission?.granted) {
       requestPermission();
     }
+    // Get current user profile
+    getCurrentUserProfile().then((user) => {
+      if (user) {
+        setUsername(user.username);
+      }
+    });
   }, [permission]);
 
-  // Simulate viewer count increase when live
+  // Subscribe to active streams to update viewer count
   useEffect(() => {
-    if (!isLive) return;
-    
-    const interval = setInterval(() => {
-      setViewerCount(prev => {
-        const newCount = prev + Math.floor(Math.random() * 5);
-        return newCount;
-      });
-    }, 3000);
+    if (!isLive || !streamId) return;
 
-    return () => clearInterval(interval);
-  }, [isLive]);
+    const unsubscribe = subscribeToActiveStreams((streams) => {
+      const currentStream = streams.find((s) => s.streamId === streamId);
+      if (currentStream) {
+        setViewerCount(currentStream.viewers);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isLive, streamId]);
 
   const toggleCameraFacing = () => {
     setCameraFacing(prev => prev === 'front' ? 'back' : 'front');
@@ -65,32 +85,96 @@ export default function LiveStreamScreen() {
     setMicOn(!micOn);
   };
 
-  const handleGoLive = () => {
+  const handleGoLive = async () => {
     if (!permission?.granted) {
       Alert.alert('Permission Required', 'Camera permission is required to go live');
       return;
     }
 
-    setIsLive(true);
-    setViewerCount(1);
-    Alert.alert('Live', 'You are now streaming! 🔴', [
-      { text: 'OK' }
-    ]);
+    if (!username) {
+      Alert.alert('Error', 'Could not load username');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Initialize Agora
+      const engine = new RtcEngine();
+      await engine.initialize(AGORA_APP_ID);
+      await engine.setChannelProfile(ChannelProfile.LiveBroadcasting);
+      await engine.setClientRole(ClientRole.Broadcaster);
+      await engine.enableVideo();
+      await engine.enableAudio();
+
+      // Create stream in Firestore
+      const newStreamId = await createLiveStream(username, 'Live Stream');
+      
+      // Get the channel ID from the stream
+      const channelId = `channel_${username}_${Date.now()}`;
+      
+      // Join Agora channel
+      await engine.joinChannel('', channelId, 0);
+
+      setRtcEngine(engine);
+      setStreamId(newStreamId);
+      setIsLive(true);
+      setViewerCount(1);
+
+      Alert.alert('Success', 'You are now streaming! 🔴');
+    } catch (error: any) {
+      console.error('Error starting live:', error);
+      Alert.alert('Error', error.message || 'Failed to start live stream');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleEndLive = () => {
+  const handleEndLive = async () => {
     Alert.alert('End Live', 'Are you sure you want to end the stream?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'End Stream',
         style: 'destructive',
-        onPress: () => {
-          setIsLive(false);
-          setViewerCount(0);
-          router.back();
+        onPress: async () => {
+          try {
+            setLoading(true);
+            
+            // Leave Agora channel
+            if (rtcEngine) {
+              await rtcEngine.leaveChannel();
+              await rtcEngine.destroy();
+              setRtcEngine(null);
+            }
+
+            // End stream in Firestore
+            if (streamId) {
+              await endLiveStream(streamId);
+            }
+
+            setIsLive(false);
+            setStreamId(null);
+            setViewerCount(0);
+            router.back();
+          } catch (error: any) {
+            console.error('Error ending live:', error);
+            Alert.alert('Error', error.message || 'Failed to end stream');
+          } finally {
+            setLoading(false);
+          }
         },
       },
     ]);
+  };
+
+  const handleInvite = async () => {
+    try {
+      await Share.share({
+        message: `Join me live on Aura App! I'm streaming as @${username} 🔴 Live: ${username}`,
+        title: 'Join My Live Stream',
+      });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
   };
 
   if (!permission) {
@@ -145,23 +229,36 @@ export default function LiveStreamScreen() {
           {/* Mic Toggle */}
           <TouchableOpacity
             style={[styles.controlBtn, !micOn && styles.controlBtnOff]}
-            onPress={toggleMic}>
+            onPress={toggleMic}
+            disabled={loading}>
             <Text style={styles.controlBtnText}>{micOn ? '🎤' : '🔇'}</Text>
           </TouchableOpacity>
 
           {/* Camera Switch */}
           <TouchableOpacity
             style={styles.controlBtn}
-            onPress={toggleCameraFacing}>
+            onPress={toggleCameraFacing}
+            disabled={loading}>
             <Text style={styles.controlBtnText}>📷</Text>
           </TouchableOpacity>
+
+          {/* Invite Button (when live) */}
+          {isLive && (
+            <TouchableOpacity
+              style={styles.controlBtn}
+              onPress={handleInvite}
+              disabled={loading}>
+              <Text style={styles.controlBtnText}>📤</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Go Live / End Live Button */}
           <TouchableOpacity
             style={[styles.liveBtn, isLive && styles.liveBtnActive]}
-            onPress={isLive ? handleEndLive : handleGoLive}>
+            onPress={isLive ? handleEndLive : handleGoLive}
+            disabled={loading}>
             <Text style={styles.liveBtnText}>
-              {isLive ? 'END LIVE' : 'GO LIVE'}
+              {loading ? 'Loading...' : isLive ? 'END LIVE' : 'GO LIVE'}
             </Text>
           </TouchableOpacity>
         </View>
